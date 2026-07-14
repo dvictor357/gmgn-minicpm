@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildArgv, normalizeArgs, listToolSchemas, COMPOSITE_TOOLS } from "../src/bridge.ts";
-import { projectUseful } from "../src/shape.ts";
+import { projectUseful, renderSummary } from "../src/shape.ts";
 import { TOOLS, type ToolDef } from "../src/tools.ts";
 
 function byName(name: string): ToolDef {
@@ -107,7 +107,7 @@ test("projectUseful keeps signal, drops noise, descends wrappers, caps arrays", 
     },
   };
   const out = projectUseful(raw) as { data: { rank: Record<string, unknown>[] } };
-  assert.equal(out.data.rank.length, 12); // capped
+  assert.equal(out.data.rank.length, 8); // capped at MAX_ARRAY_ITEMS
   const item = out.data.rank[0];
   assert.deepEqual(Object.keys(item).sort(), ["liquidity", "name", "price", "price_change_percent1h", "symbol"]);
   assert.ok(!("logo" in item) && !("dexscr_ad" in item));
@@ -131,6 +131,17 @@ test("composite tools are advertised to the model", () => {
   const names = listToolSchemas().map((s) => s.function.name);
   for (const c of COMPOSITE_TOOLS) assert.ok(names.includes(c.name), `${c.name} missing from schemas`);
   assert.ok(names.includes("gmgn_token_report"));
+});
+
+test("renderSummary turns a trending list into readable numbered lines (no JSON)", () => {
+  const data = { data: { rank: [
+    { name: "Benben", symbol: "Benben", price: 0.0000375, price_change_percent1h: 1064.86, volume: 17082, liquidity: 14124, market_cap: 36427 },
+    { name: "The Guitar Lizard", symbol: "Rango", price: 0.0000111, price_change_percent1h: 397.45, volume: 3346, liquidity: 10338, market_cap: 10699 },
+  ] } };
+  const out = renderSummary(data);
+  assert.match(out, /1\. Benben \(Benben\)/);
+  assert.match(out, /1h 1,065%|1h 1065/);
+  assert.doesNotMatch(out, /[{}]/); // never a JSON dump
 });
 
 test("every tool name is unique across primitives and composites", () => {

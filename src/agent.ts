@@ -1,6 +1,6 @@
 import { SGLANG_BASE_URL, MODEL, MAX_TOOL_ITERS, MAX_TOKENS, MAX_TOOL_RESULT_CHARS } from "./config.ts";
 import { listToolSchemas, executeTool } from "./bridge.ts";
-import { projectUseful } from "./shape.ts";
+import { projectUseful, renderSummary } from "./shape.ts";
 
 interface ToolCall {
   id: string;
@@ -156,11 +156,10 @@ async function finalAnswer(
   const msg = await callModel(messages, [], opts, "none");
   const text = stripToolXml(msg.content ?? "").trim();
   if (text) return text;
+  // Model wouldn't produce prose — render the data deterministically ourselves
+  // so the user gets a clean summary instead of a raw JSON dump.
   if (fallbackData != null) {
-    return (
-      "I retrieved the data but couldn't summarize it cleanly. Here is the raw result:\n" +
-      JSON.stringify(fallbackData, null, 2).slice(0, 2000)
-    );
+    return `Here's what I found:\n${renderSummary(fallbackData)}`;
   }
   return "(no answer produced)";
 }

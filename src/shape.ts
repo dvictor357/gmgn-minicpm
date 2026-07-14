@@ -5,7 +5,7 @@
 // and dumps JSON. This keeps the signal and drops the noise, deterministically,
 // which also shrinks the context a lot.
 
-const MAX_ARRAY_ITEMS = 12;
+const MAX_ARRAY_ITEMS = 8;
 
 // Keys whose value is a wrapper or nested record we always descend into.
 const CONTAINER_KEYS = new Set([
@@ -44,6 +44,64 @@ const USEFUL_FIELDS = new Set([
   // pool
   "dex", "base_reserve", "quote_reserve", "pool_address", "quote_symbol",
 ]);
+
+// ---- deterministic rendering ------------------------------------------------
+// When the model can't turn projected JSON into prose, we render it ourselves so
+// the user never sees a raw dump.
+
+type Rec = Record<string, unknown>;
+
+/** Find the first array-of-objects anywhere in the (projected) data. */
+function findRecordArray(v: unknown): Rec[] | null {
+  if (Array.isArray(v)) {
+    return v.length > 0 && v.every((x) => x && typeof x === "object" && !Array.isArray(x)) ? (v as Rec[]) : null;
+  }
+  if (v && typeof v === "object") {
+    for (const val of Object.values(v as Rec)) {
+      const r = findRecordArray(val);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+function num(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  if (Number.isNaN(n)) return String(v);
+  if (Math.abs(n) >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (Math.abs(n) >= 1) return n.toFixed(2);
+  return n.toPrecision(3);
+}
+
+function renderRecord(r: Rec): string {
+  const label = [r.name, r.symbol && `(${r.symbol})`].filter(Boolean).join(" ") || String(r.address ?? r.maker ?? "");
+  const bits: string[] = [];
+  if (r.price != null) bits.push(`$${num(r.price)}`);
+  if (r.price_change_percent1h != null) bits.push(`1h ${num(r.price_change_percent1h)}%`);
+  if (r.volume != null) bits.push(`vol ${num(r.volume)}`);
+  if (r.liquidity != null) bits.push(`liq ${num(r.liquidity)}`);
+  if (r.market_cap != null) bits.push(`mc ${num(r.market_cap)}`);
+  if (r.holder_count != null) bits.push(`${num(r.holder_count)} holders`);
+  if (r.rug_ratio != null) bits.push(`rug ${num(r.rug_ratio)}`);
+  if (r.side != null && r.amount_usd != null) bits.push(`${r.side} $${num(r.amount_usd)}`);
+  return `${label}${bits.length ? " — " + bits.join(" · ") : ""}`;
+}
+
+/** Deterministic human-readable summary of a (projected) GMGN result. */
+export function renderSummary(data: unknown): string {
+  const arr = findRecordArray(data);
+  if (arr) {
+    return arr.slice(0, MAX_ARRAY_ITEMS).map((r, i) => `${i + 1}. ${renderRecord(r)}`).join("\n");
+  }
+  if (data && typeof data === "object") {
+    const lines = Object.entries(data as Rec)
+      .filter(([, v]) => v !== null && typeof v !== "object")
+      .map(([k, v]) => `- ${k}: ${typeof v === "number" ? num(v) : v}`);
+    if (lines.length) return lines.join("\n");
+  }
+  return JSON.stringify(data).slice(0, 1500);
+}
 
 /** Recursively keep container keys + useful leaf fields, capping arrays. */
 export function projectUseful(value: unknown): unknown {
