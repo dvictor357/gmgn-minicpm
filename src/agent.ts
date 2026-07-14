@@ -97,7 +97,11 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
 
     const calls = msg.tool_calls ?? [];
     if (calls.length === 0) {
-      return msg.content ?? "";
+      const text = (msg.content ?? "").trim();
+      if (text) return text;
+      // Empty message with no tool call — the model whiffed. Nudge and retry.
+      messages.push({ role: "user", content: "Call the appropriate tool to answer the question, then summarize the result." });
+      continue;
     }
 
     for (const call of calls) {
