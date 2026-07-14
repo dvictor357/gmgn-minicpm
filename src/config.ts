@@ -1,8 +1,10 @@
 // Runtime configuration, all overridable via environment variables.
 // See .env.example for documentation.
 
-export const SGLANG_BASE_URL = process.env.SGLANG_BASE_URL ?? "http://127.0.0.1:30000/v1";
-export const MODEL = process.env.GMGN_LOCAL_MODEL ?? "openbmb/MiniCPM5-1B";
+// Defaults target the verified llama.cpp llama-server setup (scripts/serve-llamacpp.sh).
+// For SGLang on CUDA, set SGLANG_BASE_URL=http://127.0.0.1:30000/v1.
+export const SGLANG_BASE_URL = process.env.SGLANG_BASE_URL ?? "http://127.0.0.1:8080/v1";
+export const MODEL = process.env.GMGN_LOCAL_MODEL ?? "openbmb/MiniCPM5-1B-GGUF";
 export const GMGN_CLI_BIN = process.env.GMGN_CLI_BIN ?? "gmgn-cli";
 export const MAX_TOOL_ITERS = Number(process.env.GMGN_LOCAL_MAX_ITERS ?? 6);
 // Cap generation per turn. Small models can otherwise spiral on an error and

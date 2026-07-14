@@ -27,14 +27,20 @@ Rules:
  * Run one natural-language query through the model + gmgn tool loop.
  * Talks to any OpenAI-compatible /chat/completions endpoint (SGLang recommended).
  */
-export async function runAgent(userInput: string, opts: { verbose?: boolean } = {}): Promise<string> {
-  const messages: Message[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: userInput },
-  ];
-  const tools = listToolSchemas();
+// Retry ladder: greedy first (most reliable for tool calls), then add a little
+// entropy to escape a deterministic bad decode. A 1B model occasionally emits a
+// malformed/runaway tool-call JSON that llama.cpp rejects with a 500 — retrying
+// with more temperature usually lands a clean call.
+const TEMPERATURE_LADDER = [0, 0.4, 0.7];
 
-  for (let i = 0; i < MAX_TOOL_ITERS; i++) {
+async function callModel(
+  messages: Message[],
+  tools: unknown,
+  opts: { verbose?: boolean },
+  toolChoice: "auto" | "none" = "auto",
+): Promise<Message> {
+  let lastError = "";
+  for (const temperature of TEMPERATURE_LADDER) {
     const res = await fetch(`${SGLANG_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -42,19 +48,38 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
         model: MODEL,
         messages,
         tools,
-        tool_choice: "auto",
-        temperature: 0.2,
+        tool_choice: toolChoice,
+        temperature,
         max_tokens: MAX_TOKENS,
       }),
     });
-
-    if (!res.ok) {
-      throw new Error(`model server responded ${res.status}: ${await res.text()}`);
+    if (res.ok) {
+      const json = (await res.json()) as { choices?: { message?: Message }[] };
+      const msg = json.choices?.[0]?.message;
+      if (msg) return msg;
+      lastError = "response contained no message";
+      continue;
     }
+    lastError = `${res.status}: ${(await res.text()).slice(0, 200)}`;
+    // 4xx (e.g. context overflow) won't be fixed by retrying — fail fast.
+    if (res.status < 500) break;
+    if (opts.verbose) console.error(`  ⚠ model ${res.status}, retrying with more entropy…`);
+  }
+  throw new Error(`model server ${lastError}`);
+}
 
-    const json = (await res.json()) as { choices?: { message?: Message }[] };
-    const msg = json.choices?.[0]?.message;
-    if (!msg) throw new Error("model response contained no message");
+export async function runAgent(userInput: string, opts: { verbose?: boolean } = {}): Promise<string> {
+  const messages: Message[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: userInput },
+  ];
+  const tools = listToolSchemas();
+  // Cache tool results by name+args so a looping model doesn't re-hit the API,
+  // and so identical repeated calls stop consuming fresh rounds of real work.
+  const seen = new Map<string, string>();
+
+  for (let i = 0; i < MAX_TOOL_ITERS; i++) {
+    const msg = await callModel(messages, tools, opts, "auto");
     messages.push(msg);
 
     const calls = msg.tool_calls ?? [];
@@ -71,16 +96,25 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
         // leave args empty; executeTool will report the missing-required error
       }
       if (opts.verbose) console.error(`  ↳ ${name}(${JSON.stringify(args)})`);
-      const result = await executeTool(name, args);
-      let content = JSON.stringify(result);
-      if (content.length > MAX_TOOL_RESULT_CHARS) {
-        content =
-          content.slice(0, MAX_TOOL_RESULT_CHARS) +
-          `…[truncated ${content.length - MAX_TOOL_RESULT_CHARS} chars; pass a smaller 'limit' if you need the full list]`;
+
+      const sig = `${name}:${JSON.stringify(args)}`;
+      let content = seen.get(sig);
+      if (content === undefined) {
+        const result = await executeTool(name, args);
+        content = JSON.stringify(result);
+        if (content.length > MAX_TOOL_RESULT_CHARS) {
+          content =
+            content.slice(0, MAX_TOOL_RESULT_CHARS) +
+            `…[truncated ${content.length - MAX_TOOL_RESULT_CHARS} chars; pass a smaller 'limit' if you need the full list]`;
+        }
+        seen.set(sig, content);
       }
       messages.push({ role: "tool", tool_call_id: call.id, name, content });
     }
   }
 
-  return "(stopped: reached the maximum number of tool-call rounds without a final answer)";
+  // Out of tool rounds without a natural answer — force a final text response
+  // from the data already gathered, so the user always gets a reply.
+  const final = await callModel(messages, tools, opts, "none");
+  return final.content ?? "(no answer produced)";
 }
