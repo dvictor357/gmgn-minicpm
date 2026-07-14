@@ -2,10 +2,14 @@
 import { createInterface } from "node:readline";
 import { runAgent } from "./agent.ts";
 import { TOOLS } from "./tools.ts";
+import { COMPOSITE_TOOLS } from "./bridge.ts";
 
 function printTools(): void {
-  for (const t of TOOLS) console.log(`${t.name.padEnd(30)} ${t.description}`);
-  console.log(`\n${TOOLS.length} read-only tools. Fund-moving commands are not exposed.`);
+  for (const t of TOOLS) console.log(`${t.name.padEnd(32)} ${t.description}`);
+  console.log("\n-- composite (one call, several primitives) --");
+  for (const c of COMPOSITE_TOOLS) console.log(`${c.name.padEnd(32)} ${c.description}`);
+  const total = TOOLS.length + COMPOSITE_TOOLS.length;
+  console.log(`\n${total} read-only tools (${TOOLS.length} primitive + ${COMPOSITE_TOOLS.length} composite). Fund-moving commands are not exposed.`);
 }
 
 async function main(): Promise<void> {

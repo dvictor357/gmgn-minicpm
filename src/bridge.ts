@@ -43,12 +43,74 @@ export function normalizeArgs(tool: ToolDef, args: Record<string, unknown>): Rec
   return out;
 }
 
-/** OpenAI-compatible tool/function schemas to send to the model. */
+// Composite tools bundle several read-only primitives into one call. A 1B model
+// answers a whole question ("is this token safe?") in a single tool call instead
+// of orchestrating three — which is exactly where small models tend to loop.
+interface CompositeDef {
+  name: string;
+  description: string;
+  parameters: ToolDef["parameters"];
+  steps: { label: string; tool: string }[];
+}
+
+const chainProp = { type: "string", enum: ["sol", "bsc", "base", "eth", "robinhood"], description: "Blockchain." };
+
+export const COMPOSITE_TOOLS: CompositeDef[] = [
+  {
+    name: "gmgn_token_report",
+    description: "Full token due-diligence in one call: basic info + realtime price, security audit (honeypot/rug/renounced), and liquidity pool. Use this for 'is this token safe / legit', 'should I buy', or any overall token check — prefer it over calling the individual token tools separately.",
+    parameters: {
+      type: "object",
+      properties: {
+        chain: chainProp,
+        address: { type: "string", description: "Token contract address. Never invent one." },
+      },
+      required: ["chain", "address"],
+      additionalProperties: false,
+    },
+    steps: [
+      { label: "info", tool: "gmgn_token_info" },
+      { label: "security", tool: "gmgn_token_security" },
+      { label: "pool", tool: "gmgn_token_pool" },
+    ],
+  },
+  {
+    name: "gmgn_wallet_report",
+    description: "Full wallet report in one call: trading stats (P&L, win rate) + current holdings. Use for 'analyze this wallet', 'should I copy-trade them', or any overall wallet check.",
+    parameters: {
+      type: "object",
+      properties: {
+        chain: chainProp,
+        wallet: { type: "string", description: "Wallet address. Never invent one." },
+      },
+      required: ["chain", "wallet"],
+      additionalProperties: false,
+    },
+    steps: [
+      { label: "stats", tool: "gmgn_portfolio_stats" },
+      { label: "holdings", tool: "gmgn_portfolio_holdings" },
+    ],
+  },
+];
+
+const COMPOSITE_REGISTRY = new Map<string, CompositeDef>(COMPOSITE_TOOLS.map((c) => [c.name, c]));
+
+/** OpenAI-compatible tool/function schemas to send to the model (primitives + composites). */
 export function listToolSchemas() {
-  return TOOLS.map((t) => ({
-    type: "function" as const,
-    function: { name: t.name, description: t.description, parameters: t.parameters },
-  }));
+  const all = [
+    ...TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
+    ...COMPOSITE_TOOLS.map((c) => ({ name: c.name, description: c.description, parameters: c.parameters })),
+  ];
+  return all.map((t) => ({ type: "function" as const, function: t }));
+}
+
+async function runComposite(def: CompositeDef, args: Record<string, unknown>): Promise<CliResult> {
+  const data: Record<string, unknown> = {};
+  for (const step of def.steps) {
+    const r = await executeTool(step.tool, args);
+    data[step.label] = r.ok ? r.data : { error: r.error };
+  }
+  return { ok: true, data };
 }
 
 /**
@@ -95,6 +157,9 @@ export function buildArgv(tool: ToolDef, args: Record<string, unknown>): string[
 
 /** Look up, validate, and execute a tool call. Never throws — returns CliResult. */
 export async function executeTool(name: string, args: Record<string, unknown>): Promise<CliResult> {
+  const composite = COMPOSITE_REGISTRY.get(name);
+  if (composite) return runComposite(composite, args);
+
   const tool = REGISTRY.get(name);
   if (!tool) return { ok: false, error: `unknown tool '${name}'` };
   let argv: string[];

@@ -171,6 +171,14 @@ export const TOOLS: ToolDef[] = [
     },
   },
 
+  // ---- gas ----
+  {
+    name: "gmgn_gas_price",
+    description: "Recommended gas price tiers for a chain. Use for 'what's the current gas / network fee'.",
+    command: ["gas-price"],
+    parameters: { type: "object", properties: { chain }, required: ["chain"], additionalProperties: false },
+  },
+
   // ---- portfolio ----
   {
     name: "gmgn_portfolio_info",

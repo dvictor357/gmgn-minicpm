@@ -12,7 +12,13 @@ const CONTAINER_KEYS = new Set([
   "data", "rank", "list", "items", "result", "tokens", "trades", "holders",
   "traders", "activities", "holdings", "token", "base_token", "quote_token",
   "maker_info", "price", "pool", "pools", "stats",
+  // composite-report section labels (see bridge.ts)
+  "info", "security", "report",
 ]);
+
+// Objects this small are already noise-free — keep them whole rather than risk
+// projecting an unfamiliar endpoint (e.g. gas-price) down to nothing.
+const SMALL_OBJECT_KEYS = 15;
 
 // Leaf fields worth keeping, across token / market / security / trade / wallet endpoints.
 const USEFUL_FIELDS = new Set([
@@ -45,13 +51,19 @@ export function projectUseful(value: unknown): unknown {
     return value.slice(0, MAX_ARRAY_ITEMS).map(projectUseful);
   }
   if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    for (const [k, v] of entries) {
       if (CONTAINER_KEYS.has(k)) {
         out[k] = projectUseful(v);
       } else if (USEFUL_FIELDS.has(k)) {
         out[k] = v && typeof v === "object" ? projectUseful(v) : v;
       }
+    }
+    // Nothing matched but the object is already small → keep it as-is rather
+    // than returning {} (handles unfamiliar endpoints like gas-price).
+    if (Object.keys(out).length === 0 && entries.length <= SMALL_OBJECT_KEYS) {
+      return value;
     }
     return out;
   }

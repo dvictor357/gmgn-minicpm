@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildArgv, normalizeArgs } from "../src/bridge.ts";
+import { buildArgv, normalizeArgs, listToolSchemas, COMPOSITE_TOOLS } from "../src/bridge.ts";
 import { projectUseful } from "../src/shape.ts";
 import { TOOLS, type ToolDef } from "../src/tools.ts";
 
@@ -122,7 +122,18 @@ test("projectUseful handles the {list:[…]} trade shape with nested maker_info"
   assert.ok(!("avatar" in (t.maker_info as Record<string, unknown>)));
 });
 
-test("every tool name is unique", () => {
-  const names = new Set(TOOLS.map((t) => t.name));
-  assert.equal(names.size, TOOLS.length);
+test("gas_price maps to the gas-price subcommand", () => {
+  const t = TOOLS.find((x) => x.name === "gmgn_gas_price")!;
+  assert.deepEqual(buildArgv(t, { chain: "sol" }), ["gas-price", "--chain", "sol", "--raw"]);
+});
+
+test("composite tools are advertised to the model", () => {
+  const names = listToolSchemas().map((s) => s.function.name);
+  for (const c of COMPOSITE_TOOLS) assert.ok(names.includes(c.name), `${c.name} missing from schemas`);
+  assert.ok(names.includes("gmgn_token_report"));
+});
+
+test("every tool name is unique across primitives and composites", () => {
+  const all = [...TOOLS.map((t) => t.name), ...COMPOSITE_TOOLS.map((c) => c.name)];
+  assert.equal(new Set(all).size, all.length);
 });
