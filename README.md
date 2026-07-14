@@ -102,9 +102,9 @@ npm run typecheck  # tsc --noEmit
 
 ## Roadmap
 
-- [ ] **Fase 2 — LoRA fine-tune.** Generate a synthetic `(query → tool_call)` dataset from GMGN's skill docs and LoRA MiniCPM5-1B for more reliable flag/chain selection on 1B.
+- [x] **LoRA dataset generator.** `npm run dataset` builds a `(query → tool_call → gold answer)` set from real GMGN data with deterministic gold labels — see [docs/finetune.md](docs/finetune.md).
+- [ ] **LoRA fine-tune + fuse to GGUF** (MLX-LM on Apple Silicon) for reliable composite routing, arg selection, and concise judgment.
 - [ ] **Swap, gated.** Add fund-moving tools behind a mandatory human-confirmation / rule-engine gate — never a raw model decision.
-- [ ] **Schema autogen** from `gmgn-cli --help` + skill docs.
 - [ ] **24/7 watcher** mode (monitor trending/signals → alert).
 
 ## Credits

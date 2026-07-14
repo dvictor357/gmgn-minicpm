@@ -21,7 +21,7 @@ interface Message {
   name?: string;
 }
 
-const SYSTEM_PROMPT = `You are a READ-ONLY crypto research assistant powered by GMGN data.
+export const SYSTEM_PROMPT = `You are a READ-ONLY crypto research assistant powered by GMGN data.
 You can only READ market, token, and wallet data. You cannot buy, sell, swap, or move funds — those tools do not exist here.
 Rules:
 - Prefer the ONE-CALL composite tools for overview questions:

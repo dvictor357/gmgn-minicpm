@@ -12,6 +12,7 @@
   "scripts": {
     "start": "node src/cli.ts",
     "tools": "node src/cli.ts --list-tools",
+    "dataset": "node scripts/gen-dataset.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
