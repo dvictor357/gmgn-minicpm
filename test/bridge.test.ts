@@ -139,8 +139,10 @@ test("renderSummary turns a trending list into readable numbered lines (no JSON)
     { name: "The Guitar Lizard", symbol: "Rango", price: 0.0000111, price_change_percent1h: 397.45, volume: 3346, liquidity: 10338, market_cap: 10699 },
   ] } };
   const out = renderSummary(data);
-  assert.match(out, /1\. Benben \(Benben\)/);
-  assert.match(out, /1h 1,065%|1h 1065/);
+  assert.match(out, /Benben/);
+  assert.match(out, /Rango/);
+  assert.match(out, /│/); // rendered as a box table
+  assert.match(out, /\+1,065%|\+1065%/); // 1h % formatted with sign
   assert.doesNotMatch(out, /[{}]/); // never a JSON dump
 });
 

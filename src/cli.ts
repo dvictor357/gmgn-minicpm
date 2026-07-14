@@ -3,6 +3,20 @@ import { createInterface } from "node:readline";
 import { runAgent } from "./agent.ts";
 import { TOOLS } from "./tools.ts";
 import { COMPOSITE_TOOLS } from "./bridge.ts";
+import { startSpinner } from "./spinner.ts";
+
+/** Run one query, showing a spinner (or verbose tool log) while the model works. */
+async function ask(query: string, verbose: boolean): Promise<string> {
+  if (verbose) {
+    return runAgent(query, { onTool: (name, args) => console.error(`  ↳ ${name}(${JSON.stringify(args)})`) });
+  }
+  const spin = startSpinner("thinking…");
+  try {
+    return await runAgent(query, { onTool: (name) => spin.update(`${name.replace(/^gmgn_/, "")}…`) });
+  } finally {
+    spin.stop();
+  }
+}
 
 function printTools(): void {
   for (const t of TOOLS) console.log(`${t.name.padEnd(32)} ${t.description}`);
@@ -24,7 +38,7 @@ async function main(): Promise<void> {
   const query = argv.filter((a) => a !== "--verbose" && a !== "-v").join(" ").trim();
 
   if (query) {
-    console.log(await runAgent(query, { verbose }));
+    console.log(await ask(query, verbose));
     return;
   }
 
@@ -37,7 +51,7 @@ async function main(): Promise<void> {
     const q = line.trim();
     if (q) {
       try {
-        console.log(await runAgent(q, { verbose }));
+        console.log(await ask(q, verbose));
       } catch (e) {
         console.error("error:", (e as Error).message);
       }

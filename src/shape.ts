@@ -52,7 +52,7 @@ const USEFUL_FIELDS = new Set([
 type Rec = Record<string, unknown>;
 
 /** Find the first array-of-objects anywhere in the (projected) data. */
-function findRecordArray(v: unknown): Rec[] | null {
+export function findRecordArray(v: unknown): Rec[] | null {
   if (Array.isArray(v)) {
     return v.length > 0 && v.every((x) => x && typeof x === "object" && !Array.isArray(x)) ? (v as Rec[]) : null;
   }
@@ -69,35 +69,63 @@ function num(v: unknown): string | null {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   if (Number.isNaN(n)) return String(v);
+  if (Number.isInteger(n)) return n.toLocaleString("en-US");
   if (Math.abs(n) >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
   if (Math.abs(n) >= 1) return n.toFixed(2);
   return n.toPrecision(3);
 }
 
-function renderRecord(r: Rec): string {
-  const label = [r.name, r.symbol && `(${r.symbol})`].filter(Boolean).join(" ") || String(r.address ?? r.maker ?? "");
-  const bits: string[] = [];
-  if (r.price != null) bits.push(`$${num(r.price)}`);
-  if (r.price_change_percent1h != null) bits.push(`1h ${num(r.price_change_percent1h)}%`);
-  if (r.volume != null) bits.push(`vol ${num(r.volume)}`);
-  if (r.liquidity != null) bits.push(`liq ${num(r.liquidity)}`);
-  if (r.market_cap != null) bits.push(`mc ${num(r.market_cap)}`);
-  if (r.holder_count != null) bits.push(`${num(r.holder_count)} holders`);
-  if (r.rug_ratio != null) bits.push(`rug ${num(r.rug_ratio)}`);
-  if (r.side != null && r.amount_usd != null) bits.push(`${r.side} $${num(r.amount_usd)}`);
-  return `${label}${bits.length ? " — " + bits.join(" · ") : ""}`;
+function pct(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  if (Number.isNaN(n)) return null;
+  const s = Math.abs(n) >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(1);
+  return `${n >= 0 ? "+" : ""}${s}%`;
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+// Column definitions; a column is shown only if at least one row has a value.
+type Col = { header: string; align: "l" | "r"; get: (r: Rec) => string | null };
+const COLUMNS: Col[] = [
+  { header: "Token", align: "l", get: (r) => truncate(String(r.name ?? r.symbol ?? r.address ?? r.maker ?? "?"), 22) },
+  { header: "Symbol", align: "l", get: (r) => (r.symbol != null ? truncate(String(r.symbol), 10) : null) },
+  { header: "Price", align: "r", get: (r) => (r.price != null ? "$" + num(r.price) : null) },
+  { header: "1h", align: "r", get: (r) => pct(r.price_change_percent1h) },
+  { header: "Vol", align: "r", get: (r) => (r.volume != null ? num(r.volume) : null) },
+  { header: "Liq", align: "r", get: (r) => (r.liquidity != null ? num(r.liquidity) : null) },
+  { header: "Mcap", align: "r", get: (r) => (r.market_cap != null ? num(r.market_cap) : null) },
+  { header: "Holders", align: "r", get: (r) => (r.holder_count != null ? num(r.holder_count) : null) },
+  { header: "Rug", align: "r", get: (r) => (r.rug_ratio != null ? num(r.rug_ratio) : null) },
+  { header: "Side", align: "l", get: (r) => (r.side != null ? String(r.side) : null) },
+  { header: "USD", align: "r", get: (r) => (r.amount_usd != null ? "$" + num(r.amount_usd) : null) },
+];
+
+function drawTable(headers: string[], rows: string[][], aligns: ("l" | "r")[]): string {
+  const w = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const pad = (s: string, i: number) => (aligns[i] === "r" ? s.padStart(w[i]) : s.padEnd(w[i]));
+  const bar = (l: string, m: string, r: string) => l + w.map((x) => "─".repeat(x + 2)).join(m) + r;
+  const line = (cells: string[]) => "│ " + cells.map((c, i) => pad(c, i)).join(" │ ") + " │";
+  return [bar("┌", "┬", "┐"), line(headers), bar("├", "┼", "┤"), ...rows.map(line), bar("└", "┴", "┘")].join("\n");
 }
 
 /** Deterministic human-readable summary of a (projected) GMGN result. */
 export function renderSummary(data: unknown): string {
   const arr = findRecordArray(data);
   if (arr) {
-    return arr.slice(0, MAX_ARRAY_ITEMS).map((r, i) => `${i + 1}. ${renderRecord(r)}`).join("\n");
+    const items = arr.slice(0, MAX_ARRAY_ITEMS);
+    const cols = COLUMNS.filter((c) => items.some((r) => c.get(r) != null));
+    const headers = ["#", ...cols.map((c) => c.header)];
+    const aligns: ("l" | "r")[] = ["r", ...cols.map((c) => c.align)];
+    const rows = items.map((r, i) => [String(i + 1), ...cols.map((c) => c.get(r) ?? "—")]);
+    return drawTable(headers, rows, aligns);
   }
   if (data && typeof data === "object") {
     const lines = Object.entries(data as Rec)
       .filter(([, v]) => v !== null && typeof v !== "object")
-      .map(([k, v]) => `- ${k}: ${typeof v === "number" ? num(v) : v}`);
+      .map(([k, v]) => `  ${k.padEnd(24)} ${typeof v === "number" ? num(v) : v}`);
     if (lines.length) return lines.join("\n");
   }
   return JSON.stringify(data).slice(0, 1500);

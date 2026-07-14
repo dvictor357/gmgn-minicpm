@@ -1,6 +1,12 @@
 import { SGLANG_BASE_URL, MODEL, MAX_TOOL_ITERS, MAX_TOKENS, MAX_TOOL_RESULT_CHARS } from "./config.ts";
 import { listToolSchemas, executeTool } from "./bridge.ts";
-import { projectUseful, renderSummary } from "./shape.ts";
+import { projectUseful, renderSummary, findRecordArray } from "./shape.ts";
+
+export interface AgentOpts {
+  verbose?: boolean;
+  /** Called when the model invokes a tool — used to drive a spinner/progress UI. */
+  onTool?: (name: string, args: Record<string, unknown>) => void;
+}
 
 interface ToolCall {
   id: string;
@@ -47,7 +53,7 @@ const TEMPERATURE_LADDER = [0, 0.4, 0.7];
 async function callModel(
   messages: Message[],
   tools: unknown,
-  opts: { verbose?: boolean },
+  opts: AgentOpts,
   toolChoice: "auto" | "none" = "auto",
 ): Promise<Message> {
   let lastError = "";
@@ -78,7 +84,7 @@ async function callModel(
   throw new Error(`model server ${lastError}`);
 }
 
-export async function runAgent(userInput: string, opts: { verbose?: boolean } = {}): Promise<string> {
+export async function runAgent(userInput: string, opts: AgentOpts = {}): Promise<string> {
   const messages: Message[] = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: userInput },
@@ -98,6 +104,9 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
     const calls = msg.tool_calls ?? [];
     if (calls.length === 0) {
       const text = (msg.content ?? "").trim();
+      // For list results, render our own table (consistent + readable) rather
+      // than the model's raw markdown. Prose is kept for single-object answers.
+      if (findRecordArray(lastGoodData)) return renderSummary(lastGoodData);
       if (text) return text;
       // Empty message with no tool call — the model whiffed. Nudge and retry.
       messages.push({ role: "user", content: "Call the appropriate tool to answer the question, then summarize the result." });
@@ -112,6 +121,7 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
       } catch {
         // leave args empty; executeTool will report the missing-required error
       }
+      opts.onTool?.(name, args);
       if (opts.verbose) console.error(`  ↳ ${name}(${JSON.stringify(args)})`);
 
       // A 1B model tends to call the same tool over and over instead of
@@ -143,13 +153,15 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
     }
   }
 
+  // List results → deterministic table; otherwise ask the model to summarize.
+  if (findRecordArray(lastGoodData)) return renderSummary(lastGoodData);
   return finalAnswer(messages, opts, lastGoodData);
 }
 
 /** Force a plain-text answer; fall back to the raw data if the model won't summarize. */
 async function finalAnswer(
   messages: Message[],
-  opts: { verbose?: boolean },
+  opts: AgentOpts,
   fallbackData: unknown,
 ): Promise<string> {
   messages.push({
