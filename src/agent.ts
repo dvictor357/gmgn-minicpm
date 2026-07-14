@@ -84,11 +84,37 @@ async function callModel(
   throw new Error(`model server ${lastError}`);
 }
 
+export type Conversation = Message[];
+
+/** Start a fresh conversation seeded with the system prompt. */
+export function newConversation(): Conversation {
+  return [{ role: "system", content: SYSTEM_PROMPT }];
+}
+
+// Keep context bounded across many turns without orphaning tool messages: drop
+// the oldest turns up to a user-message boundary.
+const HISTORY_BUDGET = 30;
+function trimHistory(messages: Conversation): void {
+  if (messages.length <= HISTORY_BUDGET) return;
+  let cut = messages.length - 16;
+  while (cut > 1 && messages[cut].role !== "user") cut++;
+  if (cut > 1 && cut < messages.length) messages.splice(1, cut - 1);
+}
+
+/** One-shot convenience: run a single query in a throwaway conversation. */
 export async function runAgent(userInput: string, opts: AgentOpts = {}): Promise<string> {
-  const messages: Message[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: userInput },
-  ];
+  return runTurn(newConversation(), userInput, opts);
+}
+
+/** Run one turn against a persistent conversation (mutates `messages` in place). */
+export async function runTurn(messages: Conversation, userInput: string, opts: AgentOpts = {}): Promise<string> {
+  trimHistory(messages);
+  messages.push({ role: "user", content: userInput });
+  // Record the final answer as an assistant turn so the next turn has context.
+  const finish = (answer: string): string => {
+    messages.push({ role: "assistant", content: answer });
+    return answer;
+  };
   const tools = listToolSchemas();
   // Cache tool results by name+args so a looping model doesn't re-hit the API,
   // and so identical repeated calls stop consuming fresh rounds of real work.
@@ -106,8 +132,8 @@ export async function runAgent(userInput: string, opts: AgentOpts = {}): Promise
       const text = (msg.content ?? "").trim();
       // For list results, render our own table (consistent + readable) rather
       // than the model's raw markdown. Prose is kept for single-object answers.
-      if (findRecordArray(lastGoodData)) return renderSummary(lastGoodData);
-      if (text) return text;
+      if (findRecordArray(lastGoodData)) return finish(renderSummary(lastGoodData));
+      if (text) return text; // model's own message is already in history
       // Empty message with no tool call — the model whiffed. Nudge and retry.
       messages.push({ role: "user", content: "Call the appropriate tool to answer the question, then summarize the result." });
       continue;
@@ -154,8 +180,8 @@ export async function runAgent(userInput: string, opts: AgentOpts = {}): Promise
   }
 
   // List results → deterministic table; otherwise ask the model to summarize.
-  if (findRecordArray(lastGoodData)) return renderSummary(lastGoodData);
-  return finalAnswer(messages, opts, lastGoodData);
+  if (findRecordArray(lastGoodData)) return finish(renderSummary(lastGoodData));
+  return finish(await finalAnswer(messages, opts, lastGoodData));
 }
 
 /** Force a plain-text answer; fall back to the raw data if the model won't summarize. */
@@ -164,12 +190,12 @@ async function finalAnswer(
   opts: AgentOpts,
   fallbackData: unknown,
 ): Promise<string> {
-  messages.push({
-    role: "user",
-    content:
-      "Do not call any tools. Using only the data already retrieved above, give your final answer now in plain text.",
-  });
-  const msg = await callModel(messages, [], opts, "none");
+  // Don't mutate the persistent conversation — build a local copy with the directive.
+  const local: Message[] = [
+    ...messages,
+    { role: "user", content: "Do not call any tools. Using only the data already retrieved above, give your final answer now in plain text." },
+  ];
+  const msg = await callModel(local, [], opts, "none");
   const text = stripToolXml(msg.content ?? "").trim();
   if (text) return text;
   // Model wouldn't produce prose — render the data deterministically ourselves

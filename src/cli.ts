@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
-import { runAgent } from "./agent.ts";
+import { runTurn, newConversation, type Conversation } from "./agent.ts";
 import { TOOLS } from "./tools.ts";
 import { COMPOSITE_TOOLS } from "./bridge.ts";
 import { startSpinner } from "./spinner.ts";
 
-/** Run one query, showing a spinner (or verbose tool log) while the model works. */
-async function ask(query: string, verbose: boolean): Promise<string> {
+/** Run one turn against a conversation, showing a spinner (or verbose tool log). */
+async function ask(session: Conversation, query: string, verbose: boolean): Promise<string> {
   if (verbose) {
-    return runAgent(query, { onTool: (name, args) => console.error(`  ↳ ${name}(${JSON.stringify(args)})`) });
+    return runTurn(session, query, { onTool: (name, args) => console.error(`  ↳ ${name}(${JSON.stringify(args)})`) });
   }
   const spin = startSpinner("thinking…");
   try {
-    return await runAgent(query, { onTool: (name) => spin.update(`${name.replace(/^gmgn_/, "")}…`) });
+    return await runTurn(session, query, { onTool: (name) => spin.update(`${name.replace(/^gmgn_/, "")}…`) });
   } finally {
     spin.stop();
   }
@@ -38,12 +38,13 @@ async function main(): Promise<void> {
   const query = argv.filter((a) => a !== "--verbose" && a !== "-v").join(" ").trim();
 
   if (query) {
-    console.log(await ask(query, verbose));
+    console.log(await ask(newConversation(), query, verbose));
     return;
   }
 
-  // Interactive REPL
+  // Interactive REPL — one conversation persists across lines (multi-turn memory).
   console.log("gmgn-minicpm — read-only GMGN research via a local model. Ctrl+C to exit.\n");
+  const session = newConversation();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   rl.setPrompt("gmgn> ");
   rl.prompt();
@@ -51,7 +52,7 @@ async function main(): Promise<void> {
     const q = line.trim();
     if (q) {
       try {
-        console.log(await ask(q, verbose));
+        console.log(await ask(session, q, verbose));
       } catch (e) {
         console.error("error:", (e as Error).message);
       }
