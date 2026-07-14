@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildArgv, normalizeArgs } from "../src/bridge.ts";
+import { projectUseful } from "../src/shape.ts";
 import { TOOLS, type ToolDef } from "../src/tools.ts";
 
 function byName(name: string): ToolDef {
@@ -85,6 +86,40 @@ test("no fund-moving subcommand is registered", () => {
   for (const t of TOOLS) {
     assert.ok(!blocked.has(t.command[0]), `${t.name} exposes a blocked root command`);
   }
+});
+
+test("projectUseful keeps signal, drops noise, descends wrappers, caps arrays", () => {
+  const raw = {
+    code: 0,
+    data: {
+      rank: Array.from({ length: 30 }, (_, i) => ({
+        name: `T${i}`,
+        symbol: `T${i}`,
+        price: 1,
+        price_change_percent1h: 10,
+        liquidity: 100,
+        // noise that must be dropped:
+        logo: "https://x/y.webp",
+        twitter_rename_count: 0,
+        dexscr_ad: 0,
+        image_dup: "0",
+      })),
+    },
+  };
+  const out = projectUseful(raw) as { data: { rank: Record<string, unknown>[] } };
+  assert.equal(out.data.rank.length, 12); // capped
+  const item = out.data.rank[0];
+  assert.deepEqual(Object.keys(item).sort(), ["liquidity", "name", "price", "price_change_percent1h", "symbol"]);
+  assert.ok(!("logo" in item) && !("dexscr_ad" in item));
+});
+
+test("projectUseful handles the {list:[…]} trade shape with nested maker_info", () => {
+  const raw = { list: [{ maker: "W", side: "buy", amount_usd: 500, timestamp: 1, maker_info: { name: "whale", tags: ["smart_degen"], avatar: "x" } }] };
+  const out = projectUseful(raw) as { list: Record<string, unknown>[] };
+  const t = out.list[0];
+  assert.equal((t.maker_info as Record<string, unknown>).name, "whale");
+  assert.deepEqual((t.maker_info as Record<string, unknown>).tags, ["smart_degen"]);
+  assert.ok(!("avatar" in (t.maker_info as Record<string, unknown>)));
 });
 
 test("every tool name is unique", () => {

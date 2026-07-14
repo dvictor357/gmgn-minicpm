@@ -1,5 +1,6 @@
 import { SGLANG_BASE_URL, MODEL, MAX_TOOL_ITERS, MAX_TOKENS, MAX_TOOL_RESULT_CHARS } from "./config.ts";
 import { listToolSchemas, executeTool } from "./bridge.ts";
+import { projectUseful } from "./shape.ts";
 
 interface ToolCall {
   id: string;
@@ -114,8 +115,14 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
       let content = seen.get(sig);
       if (content === undefined) {
         const result = await executeTool(name, args);
-        if (result.ok) lastGoodData = result.data;
-        content = JSON.stringify(result);
+        if (result.ok) {
+          // Shrink the raw GMGN payload to the useful fields before the model sees it.
+          const shaped = projectUseful(result.data);
+          lastGoodData = shaped;
+          content = JSON.stringify({ ok: true, data: shaped });
+        } else {
+          content = JSON.stringify(result);
+        }
         if (content.length > MAX_TOOL_RESULT_CHARS) {
           content =
             content.slice(0, MAX_TOOL_RESULT_CHARS) +
