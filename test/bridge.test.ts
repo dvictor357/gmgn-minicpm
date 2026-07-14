@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildArgv } from "../src/bridge.ts";
+import { buildArgv, normalizeArgs } from "../src/bridge.ts";
 import { TOOLS, type ToolDef } from "../src/tools.ts";
 
 function byName(name: string): ToolDef {
@@ -55,6 +55,29 @@ test("invalid enum value is rejected with the allowed set", () => {
     () => buildArgv(byName("gmgn_track_smartmoney"), { chain: "5" }),
     /invalid value "5" for 'chain'; must be one of: sol, bsc, base, eth/,
   );
+});
+
+test("array args become repeated flags (--platform A --platform B)", () => {
+  const argv = buildArgv(byName("gmgn_market_trending"), {
+    chain: "sol",
+    platform: ["Pump.fun", "letsbonk"],
+  });
+  const joined = argv.join(" ");
+  assert.match(joined, /--platform Pump\.fun --platform letsbonk/);
+});
+
+test("a launchpad name in 'chain' is normalized to its chain + platform filter", () => {
+  const args = normalizeArgs(byName("gmgn_market_trending"), { chain: "pump.fun" });
+  assert.equal(args.chain, "sol");
+  assert.deepEqual(args.platform, ["Pump.fun"]);
+  const argv = buildArgv(byName("gmgn_market_trending"), args);
+  assert.match(argv.join(" "), /--chain sol --platform Pump\.fun/);
+});
+
+test("four.meme normalizes to bsc", () => {
+  const args = normalizeArgs(byName("gmgn_market_trending"), { chain: "four.meme" });
+  assert.equal(args.chain, "bsc");
+  assert.deepEqual(args.platform, ["fourmeme"]);
 });
 
 test("no fund-moving subcommand is registered", () => {

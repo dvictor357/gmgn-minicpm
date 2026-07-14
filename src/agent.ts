@@ -18,6 +18,11 @@ const SYSTEM_PROMPT = `You are a READ-ONLY crypto research assistant powered by 
 You can only READ market, token, and wallet data. You cannot buy, sell, swap, or move funds — those tools do not exist here.
 Rules:
 - Always pass the correct 'chain' (sol/bsc/base/eth/robinhood) for each tool.
+- Launchpads/platforms are NOT chains. When the user names a platform, infer its chain and use the trending tool (pass the platform in 'platform'):
+    sol: pump.fun, letsbonk, moonshot, bonk, bags, believe, boop, raydium
+    bsc: four.meme (fourmeme), flap, clanker
+    base: clanker, flaunch, zora
+  Never tell the user a platform is "unsupported" — map it to its chain and proceed.
 - Token and wallet addresses must be exact. Never invent an address. If the user did not provide one, ask for it instead of guessing.
 - Prefer a single well-chosen tool call over many. Only call more tools if the answer genuinely needs them.
 - After tools return, answer the user in plain language and cite the concrete numbers (price, liquidity, P&L, etc.).
@@ -41,17 +46,16 @@ async function callModel(
 ): Promise<Message> {
   let lastError = "";
   for (const temperature of TEMPERATURE_LADDER) {
+    // In "none" mode (forced final answer) omit tools entirely, so the model
+    // can't leak a tool-call as raw text — it must produce a plain summary.
+    const body =
+      toolChoice === "none"
+        ? { model: MODEL, messages, temperature, max_tokens: MAX_TOKENS }
+        : { model: MODEL, messages, tools, tool_choice: toolChoice, temperature, max_tokens: MAX_TOKENS };
     const res = await fetch(`${SGLANG_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        tools,
-        tool_choice: toolChoice,
-        temperature,
-        max_tokens: MAX_TOKENS,
-      }),
+      body: JSON.stringify(body),
     });
     if (res.ok) {
       const json = (await res.json()) as { choices?: { message?: Message }[] };
@@ -77,8 +81,11 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
   // Cache tool results by name+args so a looping model doesn't re-hit the API,
   // and so identical repeated calls stop consuming fresh rounds of real work.
   const seen = new Map<string, string>();
+  const callCount = new Map<string, number>();
+  let lastGoodData: unknown = null;
+  let forceFinal = false;
 
-  for (let i = 0; i < MAX_TOOL_ITERS; i++) {
+  for (let i = 0; i < MAX_TOOL_ITERS && !forceFinal; i++) {
     const msg = await callModel(messages, tools, opts, "auto");
     messages.push(msg);
 
@@ -88,7 +95,7 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
     }
 
     for (const call of calls) {
-      const name = call.function?.name;
+      const name = call.function?.name ?? "";
       let args: Record<string, unknown> = {};
       try {
         args = JSON.parse(call.function?.arguments || "{}");
@@ -97,10 +104,17 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
       }
       if (opts.verbose) console.error(`  ↳ ${name}(${JSON.stringify(args)})`);
 
+      // A 1B model tends to call the same tool over and over instead of
+      // answering. After the 3rd call to any one tool, wrap up.
+      const n = (callCount.get(name) ?? 0) + 1;
+      callCount.set(name, n);
+      if (n >= 3) forceFinal = true;
+
       const sig = `${name}:${JSON.stringify(args)}`;
       let content = seen.get(sig);
       if (content === undefined) {
         const result = await executeTool(name, args);
+        if (result.ok) lastGoodData = result.data;
         content = JSON.stringify(result);
         if (content.length > MAX_TOOL_RESULT_CHARS) {
           content =
@@ -113,8 +127,37 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
     }
   }
 
-  // Out of tool rounds without a natural answer — force a final text response
-  // from the data already gathered, so the user always gets a reply.
-  const final = await callModel(messages, tools, opts, "none");
-  return final.content ?? "(no answer produced)";
+  return finalAnswer(messages, opts, lastGoodData);
+}
+
+/** Force a plain-text answer; fall back to the raw data if the model won't summarize. */
+async function finalAnswer(
+  messages: Message[],
+  opts: { verbose?: boolean },
+  fallbackData: unknown,
+): Promise<string> {
+  messages.push({
+    role: "user",
+    content:
+      "Do not call any tools. Using only the data already retrieved above, give your final answer now in plain text.",
+  });
+  const msg = await callModel(messages, [], opts, "none");
+  const text = stripToolXml(msg.content ?? "").trim();
+  if (text) return text;
+  if (fallbackData != null) {
+    return (
+      "I retrieved the data but couldn't summarize it cleanly. Here is the raw result:\n" +
+      JSON.stringify(fallbackData, null, 2).slice(0, 2000)
+    );
+  }
+  return "(no answer produced)";
+}
+
+/** Strip any tool-call markup a small model leaks into plain-text content. */
+function stripToolXml(s: string): string {
+  return s
+    .replace(/<function[\s\S]*?<\/function>/g, "")
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
+    .replace(/<\|?tool_call\|?>[\s\S]*/g, "")
+    .trim();
 }

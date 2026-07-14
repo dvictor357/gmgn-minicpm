@@ -113,7 +113,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "gmgn_market_trending",
-    description: "Trending tokens ranked by trading activity. Use for 'what's pumping / hot coins right now'.",
+    description: "Trending tokens ranked by trading activity, optionally filtered to specific launchpad platforms. Use for 'what's pumping / hot coins right now' or 'trending on pump.fun/letsbonk/four.meme'. A launchpad name is NOT a chain — map it to its chain (pump.fun/letsbonk/moonshot/bonk/bags/believe → sol; fourmeme/four.meme/flap → bsc; clanker/flaunch/zora → base) and pass it in 'platform'.",
     command: ["market", "trending"],
     parameters: {
       type: "object",
@@ -121,6 +121,11 @@ export const TOOLS: ToolDef[] = [
         chain,
         interval: { type: "string", enum: ["1m", "5m", "1h", "6h", "24h"], description: "Trending window." },
         limit,
+        platform: {
+          type: "array",
+          items: { type: "string" },
+          description: "Filter to launchpad platforms (exact names). sol: Pump.fun, letsbonk, moonshot_app, bonkers, bags, believe, boop, ray_launchpad. bsc: fourmeme, flap, clanker, lunafun. base: clanker, flaunch, zora.",
+        },
       },
       required: ["chain"], additionalProperties: false,
     },
