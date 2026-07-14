@@ -75,6 +75,13 @@ test("a launchpad name in 'chain' is normalized to its chain + platform filter",
   assert.match(argv.join(" "), /--chain sol --platform Pump\.fun/);
 });
 
+test("trending gets a default interval (gmgn-cli requires it)", () => {
+  const args = normalizeArgs(byName("gmgn_market_trending"), { chain: "sol" });
+  assert.equal(args.interval, "1h");
+  // but an explicit interval is respected
+  assert.equal(normalizeArgs(byName("gmgn_market_trending"), { chain: "sol", interval: "5m" }).interval, "5m");
+});
+
 test("four.meme normalizes to bsc", () => {
   const args = normalizeArgs(byName("gmgn_market_trending"), { chain: "four.meme" });
   assert.equal(args.chain, "bsc");

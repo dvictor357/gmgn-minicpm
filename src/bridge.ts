@@ -28,7 +28,13 @@ const PLATFORM_TO_CHAIN: Record<string, { chain: string; platform: string }> = {
   zora: { chain: "base", platform: "zora" },
 };
 
-/** Deterministically fix a launchpad name that the model put in `chain`. */
+// Some gmgn-cli subcommands have a required flag the model keeps forgetting.
+// Inject a sensible default deterministically rather than hope it complies.
+const TOOL_DEFAULTS: Record<string, Record<string, unknown>> = {
+  gmgn_market_trending: { interval: "1h" }, // gmgn-cli requires --interval
+};
+
+/** Deterministically fix a launchpad name in `chain` and fill in required defaults. */
 export function normalizeArgs(tool: ToolDef, args: Record<string, unknown>): Record<string, unknown> {
   const out = { ...(args ?? {}) };
   const props = tool.parameters.properties;
@@ -39,6 +45,9 @@ export function normalizeArgs(tool: ToolDef, args: Record<string, unknown>): Rec
     // Only set platform if the tool supports it and the model didn't already give one.
     const hasPlatform = Array.isArray(out.platform) && out.platform.length > 0;
     if ("platform" in props && !hasPlatform) out.platform = [mapped.platform];
+  }
+  for (const [k, v] of Object.entries(TOOL_DEFAULTS[tool.name] ?? {})) {
+    if (out[k] === undefined || out[k] === null || out[k] === "") out[k] = v;
   }
   return out;
 }
