@@ -1,4 +1,4 @@
-import { SGLANG_BASE_URL, MODEL, MAX_TOOL_ITERS } from "./config.ts";
+import { SGLANG_BASE_URL, MODEL, MAX_TOOL_ITERS, MAX_TOKENS, MAX_TOOL_RESULT_CHARS } from "./config.ts";
 import { listToolSchemas, executeTool } from "./bridge.ts";
 
 interface ToolCall {
@@ -44,6 +44,7 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
         tools,
         tool_choice: "auto",
         temperature: 0.2,
+        max_tokens: MAX_TOKENS,
       }),
     });
 
@@ -71,12 +72,13 @@ export async function runAgent(userInput: string, opts: { verbose?: boolean } = 
       }
       if (opts.verbose) console.error(`  ↳ ${name}(${JSON.stringify(args)})`);
       const result = await executeTool(name, args);
-      messages.push({
-        role: "tool",
-        tool_call_id: call.id,
-        name,
-        content: JSON.stringify(result),
-      });
+      let content = JSON.stringify(result);
+      if (content.length > MAX_TOOL_RESULT_CHARS) {
+        content =
+          content.slice(0, MAX_TOOL_RESULT_CHARS) +
+          `…[truncated ${content.length - MAX_TOOL_RESULT_CHARS} chars; pass a smaller 'limit' if you need the full list]`;
+      }
+      messages.push({ role: "tool", tool_call_id: call.id, name, content });
     }
   }
 

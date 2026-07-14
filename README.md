@@ -38,20 +38,24 @@ Nothing here is financial advice. It reads data; you make decisions.
   gmgn-cli config          # follow the prompt to create + apply an API key
   gmgn-cli config --check  # must exit 0
   ```
-- **A local server for MiniCPM5-1B** exposing an OpenAI-compatible `/v1/chat/completions` with tool calls. [SGLang](https://docs.sglang.ai) is recommended because it ships a `minicpm5` parser that emits native `tool_calls`.
+- **A local server for MiniCPM5-1B** exposing an OpenAI-compatible `/v1/chat/completions` with tool calls:
+  - **Apple Silicon / CPU → [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`)** is the verified path. With `--jinja` it parses MiniCPM5's tool calls into native OpenAI `tool_calls`. Install via `brew install llama.cpp`.
+  - **NVIDIA / CUDA → [SGLang](https://docs.sglang.ai)** with `--tool-call-parser minicpm5` also works.
+
+> **Verified:** Apple M4 Pro / 48 GB, MiniCPM5-1B **F16** GGUF on `llama-server`, Metal-accelerated at ~90–100 tok/s. Full loop (model → gmgn-cli → answer) confirmed on live GMGN data.
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/dvictor357/gmgn-minicpm
 cd gmgn-minicpm
-cp .env.example .env        # adjust if your server/model differ
+cp .env.example .env        # points at the llama.cpp endpoint by default
 
-# 1. serve the model (separate terminal)
-bash scripts/serve-sglang.sh
+# 1. serve the model — auto-downloads the F16 GGUF from HF on first run
+bash scripts/serve-llamacpp.sh          # (NVIDIA users: scripts/serve-sglang.sh)
 
 # 2. ask something
-node src/cli.ts "is <token_address> on sol a honeypot? check security and liquidity"
+node src/cli.ts "what is smart money buying on solana right now?"
 
 # or an interactive REPL
 node src/cli.ts
@@ -77,6 +81,16 @@ Add `--verbose` to print each tool call the model makes.
 `track`: follow-tokens · follow-wallet · kol · smartmoney
 
 Run `node src/cli.ts --list-tools` for descriptions.
+
+## Running a 1B model reliably
+
+A 1B model is not a frontier model, and this repo is shaped around that. Lessons baked in:
+
+- **Cap generation** (`GMGN_LOCAL_MAX_TOKENS`, default 1024). Small models can spiral on an error and emit a runaway tool-call JSON until the context fills — which makes llama.cpp return a hard 500. Capping tokens prevents it.
+- **Truncate tool results** (`GMGN_LOCAL_MAX_TOOL_RESULT_CHARS`, default 4000). A single `trending` response is ~7 KB; a few unbounded results overflow an 8k context. Serve with a roomy `-c 32768`.
+- **Validate enums in the bridge.** The model occasionally invents a `chain` like `"5"`; `bridge.ts` rejects it with `must be one of: sol, bsc, base, eth` so the model can self-correct instead of shelling out garbage.
+
+These are exactly the rough edges a LoRA fine-tune (see roadmap) would smooth out.
 
 ## Development
 

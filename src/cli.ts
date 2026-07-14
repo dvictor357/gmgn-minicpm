@@ -44,6 +44,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error("error:", (e as Error).message);
   process.exit(1);
 });

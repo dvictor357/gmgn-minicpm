@@ -40,6 +40,10 @@ export function buildArgv(tool: ToolDef, args: Record<string, unknown>): string[
   for (const [key, val] of Object.entries(safeArgs)) {
     if (val === undefined || val === null || val === "") continue;
     if (!(key in props)) continue; // ignore args the model invented
+    const spec = props[key];
+    if (spec.enum && !spec.enum.includes(String(val))) {
+      throw new Error(`invalid value ${JSON.stringify(val)} for '${key}'; must be one of: ${spec.enum.join(", ")}`);
+    }
     const flag = `--${key.replace(/_/g, "-")}`;
     if (typeof val === "boolean") {
       if (val) argv.push(flag);

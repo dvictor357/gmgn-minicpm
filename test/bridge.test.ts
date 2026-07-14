@@ -50,6 +50,13 @@ test("missing required arg is rejected before any spawn", () => {
   assert.throws(() => buildArgv(byName("gmgn_token_info"), { chain: "sol" }), /missing required arg 'address'/);
 });
 
+test("invalid enum value is rejected with the allowed set", () => {
+  assert.throws(
+    () => buildArgv(byName("gmgn_track_smartmoney"), { chain: "5" }),
+    /invalid value "5" for 'chain'; must be one of: sol, bsc, base, eth/,
+  );
+});
+
 test("no fund-moving subcommand is registered", () => {
   const blocked = new Set(["swap", "multi-swap", "order", "cooking"]);
   for (const t of TOOLS) {
