@@ -1,0 +1,35 @@
+{
+  "name": "gmgn-minicpm",
+  "version": "0.1.0",
+  "description": "Run MiniCPM5-1B on-device as a read-only GMGN crypto research agent — a local tool-calling bridge over gmgn-cli. No cloud LLM, no API cost.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "gmgn-minicpm": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "node src/cli.ts",
+    "tools": "node src/cli.ts --list-tools",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "gmgn",
+    "minicpm",
+    "llm",
+    "tool-calling",
+    "function-calling",
+    "solana",
+    "crypto",
+    "on-device",
+    "sglang",
+    "agent"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}
